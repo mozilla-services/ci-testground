@@ -1,0 +1,154 @@
+version: 2
+jobs:
+  build:
+    docker:
+      # docker:stable at time of writing
+      - image: docker:17.09.0-ce
+    working_directory: /testground
+    steps:
+      - checkout
+
+      - setup_remote_docker:
+        version: 17.09.0-ce
+
+      - restore_cache:
+          keys:
+            - v1-{{ .Branch }}
+          paths:
+            - /caches/testground-docker.tar
+
+      - run:
+          name: Load Docker image layer cache
+          command: |
+            set +o pipefail
+            docker load -i /caches/testground-docker.tar | true
+
+      - run:
+          name: Create version.json
+          command: |
+            # create a version.json per https://github.com/mozilla-services/Dockerflow/blob/master/docs/version_object.md
+            printf '{"commit":"%s","version":"%s","source":"https://github.com/%s/%s","build":"%s"}\n' \
+            "$CIRCLE_SHA1" \
+            "$CIRCLE_TAG" \
+            "$CIRCLE_PROJECT_USERNAME" \
+            "$CIRCLE_PROJECT_REPONAME" \
+            "$CIRCLE_BUILD_URL" > version.json
+
+      - run:
+          name: Build Docker image with cache
+          command: |
+            docker info
+            docker build --cache-from="testground-docker" -t testground:build .
+
+      - run:
+          name: Save Docker image layer cache
+          command: |
+            mkdir -p /caches
+            docker save -o /caches/testground-docker.tar testground-docker
+
+      - save_cache:
+          key: v1-{{ .Branch }}-{{ epoch }}
+          paths:
+            - /caches/testground-docker.tar
+
+  lint:
+    docker:
+      # docker:stable at time of writing
+      - image: docker:17.09.0-ce
+    working_directory: /testground
+    steps:
+      - setup_remote_docker:
+          version: 17.09.0-ce
+
+      - restore_cache:
+          keys:
+            - v1-{{ .Branch }}
+          paths:
+            - /caches/testground-docker.tar
+
+      - run:
+          name: Load Docker image layer cache
+          command: |
+            set +o pipefail
+            docker load -i /caches/testground-docker.tar | true
+
+      - run:
+          name: Run linter
+          command: |
+            docker run testground:build lint
+
+  test:
+    docker:
+      # docker:stable at time of writing
+      - image: docker:17.09.0-ce
+    working_directory: /testground
+    steps:
+      - setup_remote_docker:
+          version: 17.09.0-ce
+
+      - restore_cache:
+          keys:
+            - v1-{{ .Branch }}
+          paths:
+            - /caches/testground-docker.tar
+
+      - run:
+          name: Load Docker image layer cache
+          command: |
+            set +o pipefail
+            docker load -i /caches/testground-docker.tar | true
+
+      - run:
+          name: Run linter
+          command: |
+            docker run testground:build test
+
+  push:
+    docker:
+      # docker:stable at time of writing
+      - image: docker:17.09.0-ce
+    working_directory: /testground
+    steps:
+      - setup_remote_docker:
+          version: 17.09.0-ce
+
+      - restore_cache:
+          keys:
+            - v1-{{ .Branch }}
+          paths:
+            - /caches/testground-docker.tar
+
+      - run:
+          name: Load Docker image layer cache
+          command: |
+            set +o pipefail
+            docker load -i /caches/testground-docker.tar | true
+
+      - run:
+          name: Push to Dockerhub
+          command: |
+            # set DOCKER_DEPLOY=true in Circle UI to push to Dockerhub
+            DOCKER_DEPLOY="${DOCKER_DEPLOY:-false}"
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+              bin/ci/deploy-dockerhub.sh latest
+            fi
+            if [ -n "${CIRCLE_TAG}" ]; then
+              bin/ci/deploy-dockerhub.sh "$CIRCLE_TAG"
+            fi
+
+workflows:
+  version: 2
+  build-test-deploy:
+    jobs:
+      - build:
+      - lint:
+          requires:
+            - build
+      - test:
+          requires:
+            - build
+      - push:
+          - requires:
+            - build
+            - test
+            - lint
