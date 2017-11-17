@@ -9,7 +9,7 @@ jobs:
       - checkout
 
       - setup_remote_docker:
-        version: 17.09.0-ce
+          version: 17.09.0-ce
 
       - restore_cache:
           keys:
@@ -38,18 +38,21 @@ jobs:
           name: Build Docker image with cache
           command: |
             docker info
-            docker build --cache-from="testground-docker" -t testground:build .
+            docker build --cache-from="testground:build" -t testground:build .
 
       - run:
           name: Save Docker image layer cache
           command: |
             mkdir -p /caches
-            docker save -o /caches/testground-docker.tar testground-docker
+            docker save -o /caches/testground-docker.tar "testground:build"
 
       - save_cache:
           key: v1-{{ .Branch }}-{{ epoch }}
           paths:
             - /caches/testground-docker.tar
+
+      - store_artifacts:
+          path: /testground/version.json
 
   lint:
     docker:
@@ -99,7 +102,7 @@ jobs:
             docker load -i /caches/testground-docker.tar | true
 
       - run:
-          name: Run linter
+          name: Run tests
           command: |
             docker run testground:build test
 
@@ -109,6 +112,8 @@ jobs:
       - image: docker:17.09.0-ce
     working_directory: /testground
     steps:
+      - checkout
+
       - setup_remote_docker:
           version: 17.09.0-ce
 
@@ -130,17 +135,18 @@ jobs:
             # set DOCKER_DEPLOY=true in Circle UI to push to Dockerhub
             DOCKER_DEPLOY="${DOCKER_DEPLOY:-false}"
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              bin/ci/deploy-dockerhub.sh latest
+              sh bin/ci/deploy-dockerhub.sh latest
             fi
             if [ -n "${CIRCLE_TAG}" ]; then
-              bin/ci/deploy-dockerhub.sh "$CIRCLE_TAG"
+              sh bin/ci/deploy-dockerhub.sh "$CIRCLE_TAG"
             fi
 
 workflows:
   version: 2
-  build-test-deploy:
+
+  build-lint-test-push:
     jobs:
-      - build:
+      - build
       - lint:
           requires:
             - build
@@ -148,7 +154,7 @@ workflows:
           requires:
             - build
       - push:
-          - requires:
+          requires:
             - build
             - test
             - lint

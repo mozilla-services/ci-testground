@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # THIS IS MEANT TO BE RUN BY CI
 
