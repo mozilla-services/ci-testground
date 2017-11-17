@@ -146,7 +146,7 @@ workflows:
 
   build-lint-test-push:
     jobs:
-      - build
+      - build:
           filters:
             tags:
               only: /.*/
@@ -170,3 +170,5 @@ workflows:
           filters:
             tags:
               only: /.*/
+            branches:
+              only: master
