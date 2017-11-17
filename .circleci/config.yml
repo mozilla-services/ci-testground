@@ -147,14 +147,26 @@ workflows:
   build-lint-test-push:
     jobs:
       - build
+          filters:
+            tags:
+              only: /.*/
       - lint:
           requires:
             - build
+          filters:
+            tags:
+              only: /.*/
       - test:
           requires:
             - build
+          filters:
+            tags:
+              only: /.*/
       - push:
           requires:
             - build
             - test
             - lint
+          filters:
+            tags:
+              only: /.*/
