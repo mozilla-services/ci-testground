@@ -2,26 +2,31 @@ version: 2
 jobs:
   build:
     docker:
-      # docker:stable at time of writing
-      - image: docker:17.09.0-ce
-    working_directory: /testground
+      - image: docker:stable
     steps:
-      - checkout
+      - run:
+          name: Install checkout deps
+          command: |
+            set -x
+            apk update
+            apk add git openssh
 
-      - setup_remote_docker:
-          version: 17.09.0-ce
+      - checkout
+      - setup_remote_docker
 
       - restore_cache:
           keys:
-            - v1-{{ .Branch }}
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
           paths:
-            - /caches/testground-docker.tar
+            - cached-docker-image.tar
 
       - run:
           name: Load Docker image layer cache
           command: |
             set +o pipefail
-            docker load -i /caches/testground-docker.tar | true
+            docker load -i cached-docker-image.tar | true
 
       - run:
           name: Create version.json
@@ -38,107 +43,99 @@ jobs:
           name: Build Docker image with cache
           command: |
             docker info
-            docker build --cache-from="testground:build" -t testground:build .
+            docker build --cache-from="${CIRCLE_PROJECT_REPONAME}:build" -t ${CIRCLE_PROJECT_REPONAME}:build .
 
       - run:
-          name: Save Docker image layer cache
+          name: Save Docker image
           command: |
-            mkdir -p /caches
-            docker save -o /caches/testground-docker.tar "testground:build"
+            docker save -o cached-docker-image.tar "${CIRCLE_PROJECT_REPONAME}:build"
 
       - save_cache:
-          key: v1-{{ .Branch }}-{{ epoch }}
+          key: source-v1-{{ .Branch }}-{{ .Revision }}
           paths:
-            - /caches/testground-docker.tar
+            - cached-docker-image.tar
 
       - store_artifacts:
-          path: /testground/version.json
+          path: /${CIRCLE_PROJECT_REPONAME}/version.json
 
   lint:
     docker:
-      # docker:stable at time of writing
-      - image: docker:17.09.0-ce
-    working_directory: /testground
+      - image: docker:stable
     steps:
-      - setup_remote_docker:
-          version: 17.09.0-ce
-
+      - setup_remote_docker
       - restore_cache:
           keys:
-            - v1-{{ .Branch }}
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
           paths:
-            - /caches/testground-docker.tar
+            - cached-docker-image.tar
 
       - run:
           name: Load Docker image layer cache
           command: |
             set +o pipefail
-            docker load -i /caches/testground-docker.tar | true
+            docker load -i cached-docker-image.tar | true
 
       - run:
           name: Run linter
           command: |
-            docker run testground:build lint
+            docker run "${CIRCLE_PROJECT_REPONAME}:build" lint
 
   test:
     docker:
-      # docker:stable at time of writing
-      - image: docker:17.09.0-ce
-    working_directory: /testground
+      - image: docker:stable
     steps:
-      - setup_remote_docker:
-          version: 17.09.0-ce
-
+      - setup_remote_docker
       - restore_cache:
           keys:
-            - v1-{{ .Branch }}
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
           paths:
-            - /caches/testground-docker.tar
+            - cached-docker-image.tar
 
       - run:
           name: Load Docker image layer cache
           command: |
             set +o pipefail
-            docker load -i /caches/testground-docker.tar | true
+            docker load -i cached-docker-image.tar | true
 
       - run:
           name: Run tests
           command: |
-            docker run testground:build test
+            docker run ${CIRCLE_PROJECT_REPONAME}:build test
 
   push:
     docker:
-      # docker:stable at time of writing
-      - image: docker:17.09.0-ce
-    working_directory: /testground
+      - image: docker:stable
     steps:
-      - checkout
-
-      - setup_remote_docker:
-          version: 17.09.0-ce
-
+      - setup_remote_docker
       - restore_cache:
           keys:
-            - v1-{{ .Branch }}
+            - source-v1-{{ .Branch }}-{{ .Revision }}
+            - source-v1-{{ .Branch }}-
+            - source-v1-
           paths:
-            - /caches/testground-docker.tar
+            - cached-docker-image.tar
 
       - run:
           name: Load Docker image layer cache
           command: |
             set +o pipefail
-            docker load -i /caches/testground-docker.tar | true
+            docker load -i cached-docker-image.tar | true
 
       - run:
           name: Push to Dockerhub
           command: |
-            # set DOCKER_DEPLOY=true in Circle UI to push to Dockerhub
-            DOCKER_DEPLOY="${DOCKER_DEPLOY:-false}"
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              sh bin/ci/deploy-dockerhub.sh latest
-            fi
+            export DOCKER_IMAGE="mozilla/${CIRCLE_PROJECT_REPONAME}:latest"
             if [ -n "${CIRCLE_TAG}" ]; then
-              sh bin/ci/deploy-dockerhub.sh "$CIRCLE_TAG"
+                export DOCKER_IMAGE="mozilla/${CIRCLE_PROJECT_REPONAME}:${CIRCLE_TAG}"
+            fi
+            if [ "${CIRCLE_BRANCH}" == "master" ] || [ -n "${CIRCLE_TAG}" ]; then
+                echo "${DOCKER_PASSWORD}" | docker login -u="${DOCKER_USERNAME}" --password-stdin
+                docker tag "${CIRCLE_PROJECT_REPONAME}:build" "${DOCKER_IMAGE}"
+                docker push "${DOCKER_IMAGE}"
             fi
 
 workflows:
